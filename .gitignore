@@ -1,2 +1,4 @@
 .nacos-cli.yaml
 nacos-cli
+*.py
+nacos

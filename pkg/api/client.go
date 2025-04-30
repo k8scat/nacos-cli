@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -34,32 +35,52 @@ func NewClient(server, username, password string) *Client {
 
 // doRequest performs an HTTP request to the Nacos API
 func (c *Client) doRequest(method, path string, params url.Values, body []byte) (*http.Response, error) {
-	if params == nil {
-		params = url.Values{}
-	}
+	// Make a copy of params for query params and form params
+	queryParams := url.Values{}
 
-	// Add auth params if needed
+	// Add auth params to query string only
 	if c.Username != "" && c.Password != "" {
-		params.Set("username", c.Username)
-		params.Set("password", c.Password)
+		queryParams.Set("username", c.Username)
+		queryParams.Set("password", c.Password)
 	}
 
-	// Build URL
+	// Build URL with only auth params in query string
 	u, err := url.Parse(c.Server)
 	if err != nil {
 		return nil, err
 	}
 	u.Path = path
-	u.RawQuery = params.Encode()
+	u.RawQuery = queryParams.Encode()
+
+	// Set request body
+	var requestBody io.Reader
+	if method == http.MethodPost || method == http.MethodPut {
+		// For POST/PUT, use params as form body
+		if body == nil {
+			requestBody = strings.NewReader(params.Encode())
+		} else {
+			requestBody = bytes.NewReader(body)
+		}
+	} else {
+		// For other methods, add params to query string and use empty body
+		for k, v := range params {
+			for _, val := range v {
+				q := u.Query()
+				q.Add(k, val)
+				u.RawQuery = q.Encode()
+			}
+		}
+		requestBody = bytes.NewReader(body)
+	}
 
 	// Create request
-	req, err := http.NewRequest(method, u.String(), bytes.NewReader(body))
+	req, err := http.NewRequest(method, u.String(), requestBody)
 	if err != nil {
 		return nil, err
 	}
 
-	// Set headers
-	if method == http.MethodPost || method == http.MethodPut {
+	// Set headers for form post
+	if (method == http.MethodPost || method == http.MethodPut) && (body != nil || len(params) > 0) {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	}
 
@@ -108,7 +129,8 @@ func (c *Client) PublishConfig(dataId, group, content, configType, tenant string
 		params.Set("tenant", tenant)
 	}
 
-	resp, err := c.doRequest(http.MethodPost, "/nacos/v1/cs/configs", params, []byte(params.Encode()))
+	// Pass nil as body so doRequest will use params as the form body
+	resp, err := c.doRequest(http.MethodPost, "/nacos/v1/cs/configs", params, nil)
 	if err != nil {
 		return false, err
 	}
@@ -184,7 +206,8 @@ func (c *Client) RegisterInstance(serviceName, ip, port, clusterName, namespaceI
 	}
 	params.Set("ephemeral", fmt.Sprintf("%t", ephemeral))
 
-	resp, err := c.doRequest(http.MethodPost, "/nacos/v1/ns/instance", params, []byte(params.Encode()))
+	// Pass nil as body so doRequest will use params as the form body
+	resp, err := c.doRequest(http.MethodPost, "/nacos/v1/ns/instance", params, nil)
 	if err != nil {
 		return false, err
 	}
@@ -293,7 +316,7 @@ func (c *Client) CreateNamespace(namespaceId, namespaceName, namespaceDesc strin
 		params.Set("namespaceDesc", namespaceDesc)
 	}
 
-	resp, err := c.doRequest(http.MethodPost, "/nacos/v1/console/namespaces", params, []byte(params.Encode()))
+	resp, err := c.doRequest(http.MethodPost, "/nacos/v1/console/namespaces", params, nil)
 	if err != nil {
 		return false, err
 	}
@@ -319,7 +342,8 @@ func (c *Client) ModifyNamespace(namespaceId, namespaceName, namespaceDesc strin
 	params.Set("namespaceShowName", namespaceName)
 	params.Set("namespaceDesc", namespaceDesc)
 
-	resp, err := c.doRequest(http.MethodPut, "/nacos/v1/console/namespaces", params, []byte(params.Encode()))
+	// Pass nil as body so doRequest will use params as the form body
+	resp, err := c.doRequest(http.MethodPut, "/nacos/v1/console/namespaces", params, nil)
 	if err != nil {
 		return false, err
 	}
@@ -343,7 +367,8 @@ func (c *Client) DeleteNamespace(namespaceId string) (bool, error) {
 	params := url.Values{}
 	params.Set("namespaceId", namespaceId)
 
-	resp, err := c.doRequest(http.MethodDelete, "/nacos/v1/console/namespaces", params, []byte(params.Encode()))
+	// Pass nil as body so doRequest will use params as the form body for DELETE
+	resp, err := c.doRequest(http.MethodDelete, "/nacos/v1/console/namespaces", params, nil)
 	if err != nil {
 		return false, err
 	}
